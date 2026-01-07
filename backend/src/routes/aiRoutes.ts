@@ -1,5 +1,6 @@
 import { Router } from "express";
 import requireAuth from "../middleware/requireAuth";
+import requireRole from "../middleware/requireRole";
 import { suggestReply } from "../services/ai/replySuggester";
 
 const router = Router();
@@ -9,24 +10,29 @@ const router = Router();
  * body: { ticketId: string, maxComments?: number }
  */
 
-router.post("/suggest-reply", requireAuth, async (req, res) => {
-  try {
-    const { ticketId, maxComments } = req.body;
+router.post(
+  "/suggest-reply",
+  requireAuth,
+  requireRole("Admin", "Agent"),
+  async (req, res) => {
+    try {
+      const { ticketId, maxComments } = req.body;
 
-    if (!ticketId) {
-      return res.status(400).json({ message: "ticketId is required." });
+      if (!ticketId) {
+        return res.status(400).json({ message: "ticketId is required." });
+      }
+
+      const result = await suggestReply({
+        ticketId,
+        maxComments: typeof maxComments === "number" ? maxComments : undefined,
+      });
+
+      return res.json(result);
+    } catch (err) {
+      console.error("AI suggest-reply error:", err);
+      return res.status(500).json({ message: "Internal server error." });
     }
-
-    const result = await suggestReply({
-      ticketId,
-      maxComments: typeof maxComments === "number" ? maxComments : undefined,
-    });
-
-    return res.json(result);
-  } catch (err) {
-    console.error("AI suggest-reply error:", err);
-    return res.status(500).json({ message: "Internal server error." });
   }
-});
+);
 
 export default router;
