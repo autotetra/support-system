@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import api from "../api";
 import io from "socket.io-client";
 
@@ -32,6 +32,7 @@ const AgentDashboard: React.FC<AgentDashboardProps> = ({ name }) => {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [socket, setSocket] = useState<any>(null);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
+  const MAX_COMMENTS_FOR_AI = 5;
 
   const [editPriority, setEditPriority] = useState<"Low" | "Medium" | "High">(
     "Medium"
@@ -41,6 +42,9 @@ const AgentDashboard: React.FC<AgentDashboardProps> = ({ name }) => {
   >("Open");
 
   const [newComment, setNewComment] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
+  const commentRef = useRef<HTMLTextAreaElement | null>(null);
 
   // ---------------------------------------------------
   // SOCKET CONNECTION
@@ -193,7 +197,36 @@ const AgentDashboard: React.FC<AgentDashboardProps> = ({ name }) => {
       alert("Failed to add comment");
     }
   };
+  // ---------------------------------------------------
+  // SUGGEST REPLY USING AI
+  // ---------------------------------------------------
+  const handleSuggestReply = async () => {
+    if (!selectedTicket) return;
+    if (aiLoading) return;
 
+    setAiError("");
+    setAiLoading(true);
+
+    try {
+      const res = await api.post<{ suggestion: string }>(`/ai/suggest-reply`, {
+        ticketId: selectedTicket._id,
+        maxComments: MAX_COMMENTS_FOR_AI,
+      });
+
+      const suggestion = res.data?.suggestion ?? "";
+
+      // Put suggestion into the comment box (agent can edit)
+      setNewComment(suggestion);
+
+      // Focus textarea so agent can immediately edit
+      setTimeout(() => commentRef.current?.focus(), 0);
+    } catch (err) {
+      console.error("Suggest reply failed:", err);
+      setAiError("Failed to generate suggestion");
+    } finally {
+      setAiLoading(false);
+    }
+  };
   // ---------------------------------------------------
   // RENDER
   // ---------------------------------------------------
@@ -295,6 +328,7 @@ const AgentDashboard: React.FC<AgentDashboardProps> = ({ name }) => {
           </ul>
 
           <textarea
+            ref={commentRef}
             placeholder="Write a comment..."
             value={newComment}
             onChange={(e) => setNewComment(e.target.value)}
@@ -303,7 +337,16 @@ const AgentDashboard: React.FC<AgentDashboardProps> = ({ name }) => {
 
           <br />
 
-          <button onClick={handleAddComment}>Add Comment</button>
+          <button onClick={handleSuggestReply} disabled={aiLoading}>
+            {aiLoading ? "Generating..." : "Suggest Reply"}
+          </button>
+
+          {aiError && <p style={{ color: "red" }}>{aiError}</p>}
+
+          <button onClick={handleAddComment} disabled={aiLoading}>
+            Add Comment
+          </button>
+
           <button onClick={() => setSelectedTicket(null)}>Close</button>
         </div>
       )}

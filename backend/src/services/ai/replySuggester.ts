@@ -5,7 +5,15 @@ export async function suggestReply(params: {
   ticketId: string;
   maxComments?: number; // how many recent comments to include
 }): Promise<{ suggestion: string }> {
-  const { ticketId, maxComments = 5 } = params;
+  const { ticketId } = params;
+  // clamp 0..10 and default to 5
+  const maxCommentsRaw =
+    typeof params.maxComments === "number" &&
+    Number.isFinite(params.maxComments)
+      ? params.maxComments
+      : 5;
+
+  const maxComments = Math.min(Math.max(maxCommentsRaw, 0), 10);
 
   // 1) Load ticket (lean for speed)
   const ticket = await Ticket.findById(ticketId)

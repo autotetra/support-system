@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import api from "../api";
 import CreateUserForm from "./CreateUserForm";
 import CreateTicketForm from "./CreateTicketForm";
@@ -55,6 +55,10 @@ const AdminDashboard: React.FC<Props> = ({ name }) => {
   const [loadingTickets, setLoadingTickets] = useState(true);
   const [showCreateUser, setShowCreateUser] = useState(false);
   const [showCreateTicket, setShowCreateTicket] = useState(false);
+  const commentRef = useRef<HTMLTextAreaElement | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
+  const MAX_COMMENTS_FOR_AI = 5;
 
   // ---- editing state: USERS ----
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
@@ -355,6 +359,33 @@ const AdminDashboard: React.FC<Props> = ({ name }) => {
     }
   };
 
+  // ---------------------------------------------------
+  // SUGGEST REPLY USING AI
+  // ---------------------------------------------------
+  const handleSuggestReply = async () => {
+    if (!selectedTicket) return;
+
+    setAiError("");
+    setAiLoading(true);
+
+    try {
+      const res = await api.post<{ suggestion: string }>("/ai/suggest-reply", {
+        ticketId: selectedTicket._id,
+        maxComments: MAX_COMMENTS_FOR_AI,
+      });
+
+      const suggestion = res.data?.suggestion ?? "";
+      setNewComment(suggestion);
+
+      // focus textarea so admin can edit immediately
+      setTimeout(() => commentRef.current?.focus(), 0);
+    } catch (err) {
+      console.error("Suggest reply failed:", err);
+      setAiError("Failed to generate suggestion");
+    } finally {
+      setAiLoading(false);
+    }
+  };
   // =======================
   // RENDER
   // =======================
@@ -824,6 +855,7 @@ const AdminDashboard: React.FC<Props> = ({ name }) => {
             )}
 
             <textarea
+              ref={commentRef}
               placeholder="Write a comment..."
               value={newComment}
               onChange={(e) => setNewComment(e.target.value)}
@@ -831,9 +863,21 @@ const AdminDashboard: React.FC<Props> = ({ name }) => {
               style={{ width: "100%", marginTop: "10px" }}
             />
 
-            <button onClick={handleAddComment} style={{ marginTop: "10px" }}>
-              Add Comment
-            </button>
+            <div style={{ marginTop: "10px" }}>
+              <button
+                onClick={handleSuggestReply}
+                disabled={aiLoading || !selectedTicket}
+                style={{ marginRight: "10px" }}
+              >
+                {aiLoading ? "Generating..." : "Suggest Reply"}
+              </button>
+
+              <button onClick={handleAddComment} disabled={aiLoading}>
+                Add Comment
+              </button>
+            </div>
+
+            {aiError && <p style={{ color: "red" }}>{aiError}</p>}
 
             <br />
 
