@@ -2,6 +2,7 @@ import { Router } from "express";
 import requireAuth from "../middleware/requireAuth";
 import requireRole from "../middleware/requireRole";
 import { suggestReply } from "../services/ai/replySuggester";
+import { CustomRequest } from "../../types/express/custom";
 
 const router = Router();
 
@@ -14,7 +15,7 @@ router.post(
   "/suggest-reply",
   requireAuth,
   requireRole("Admin", "Agent"),
-  async (req, res) => {
+  async (req: CustomRequest, res) => {
     try {
       const { ticketId, maxComments } = req.body;
 
@@ -25,6 +26,8 @@ router.post(
       const result = await suggestReply({
         ticketId,
         maxComments: typeof maxComments === "number" ? maxComments : undefined,
+        triggeredBy: String(req.user!._id),
+        endpoint: "/api/ai/suggest-reply",
       });
 
       return res.json(result);

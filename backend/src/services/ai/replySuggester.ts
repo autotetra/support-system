@@ -1,11 +1,18 @@
 import { Ticket } from "../../models/ticketModel";
 import { openai } from "./aiClient";
+import { Types } from "mongoose";
+import { AiLogModel } from "../../models/aiLogModel";
 
 export async function suggestReply(params: {
   ticketId: string;
   maxComments?: number; // how many recent comments to include
+  triggeredBy?: string; // user ID who triggered this
+  endpoint: string; // API endpoint
 }): Promise<{ suggestion: string }> {
-  const { ticketId } = params;
+  const startedAt = Date.now();
+  const { ticketId, triggeredBy, endpoint } = params;
+  const aiModel = process.env.OPENAI_MODEL || "gpt-4.1-mini";
+
   // clamp 0..10 and default to 5
   const maxCommentsRaw =
     typeof params.maxComments === "number" &&
@@ -55,14 +62,50 @@ export async function suggestReply(params: {
   ${lastComments.length ? JSON.stringify(lastComments, null, 2) : "(none)"}
   `.trim();
 
-  // 3) Call OpenAI
-  const resp = await openai.responses.create({
-    model: process.env.AI_MODEL || "gpt-4.1-mini",
-    input,
-  });
+  try {
+    // 3) Call OpenAI
+    const resp = await openai.responses.create({
+      model: aiModel,
+      input,
+    });
 
-  const suggestion = resp.output_text?.trim();
-  if (!suggestion) throw new Error("No suggestion returned");
+    const suggestion = resp.output_text?.trim();
+    if (!suggestion) throw new Error("No suggestion returned");
 
-  return { suggestion };
+    // 4) Log success
+    await AiLogModel.create({
+      type: "suggest_reply",
+      ticketId: new Types.ObjectId(ticketId),
+      triggeredBy: new Types.ObjectId(triggeredBy),
+      aiModel,
+      endpoint,
+      inputPreview: input.slice(0, 800),
+      success: true,
+      usage: {
+        inputTokens: (resp as any)?.usage?.input_tokens,
+        outputTokens: (resp as any)?.usage?.output_tokens,
+        totalTokens: (resp as any)?.usage?.total_tokens,
+      },
+      latencyMs: Date.now() - startedAt,
+    });
+
+    return { suggestion };
+  } catch (err: any) {
+    // Log failure (don’t block the request if logging fails)
+    try {
+      await AiLogModel.create({
+        type: "suggest_reply",
+        ticketId: new Types.ObjectId(ticketId),
+        triggeredBy: new Types.ObjectId(triggeredBy),
+        aiModel,
+        endpoint,
+        inputPreview: input.slice(0, 800),
+        success: false,
+        error: err?.message || "Unknown error",
+        latencyMs: Date.now() - startedAt,
+      });
+    } catch {}
+
+    throw err;
+  }
 }
