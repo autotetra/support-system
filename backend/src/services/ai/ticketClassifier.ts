@@ -1,4 +1,5 @@
 import { openai } from "./aiClient";
+import { AiLogModel } from "../../models/aiLogModel";
 
 export type TicketCategory = "Technical" | "Billing" | "General";
 export type TicketPriority = "Low" | "Medium" | "High";
@@ -48,9 +49,14 @@ function validateClassification(obj: any): TicketClassification {
 export async function classifyTicket(params: {
   title: string;
   description?: string;
+
+  ticketId?: string; // optional because you may classify before ticket exists
+  triggeredBy?: string; // user id as string
+  endpoint: string; // API endpoint
 }): Promise<TicketClassification> {
   const title = (params.title || "").trim();
   const description = (params.description || "").trim();
+  const { ticketId, triggeredBy, endpoint } = params;
 
   const input = `
 You are a support ticket classifier.
@@ -71,25 +77,75 @@ Title: ${title}
 Description: ${description}
   `.trim();
 
-  const model = process.env.AI_MODEL || "gpt-4.1-mini";
+  // keep consistent with your reply suggester:
+  const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
 
-  const resp = await openai.responses.create({
-    model,
-    input,
-    // IMPORTANT: We force JSON
-    text: { format: { type: "json_object" } },
-  });
+  const t0 = Date.now();
 
-  const text = resp.output_text;
-  if (!text) throw new Error("No AI text returned");
-
-  let parsed: any;
   try {
-    parsed = JSON.parse(text);
-  } catch {
-    throw new Error("AI returned non-JSON text");
-  }
+    const resp = await openai.responses.create({
+      model,
+      input,
+      // IMPORTANT: We force JSON
+      text: { format: { type: "json_object" } },
+    });
 
-  console.log(parsed);
-  return validateClassification(parsed);
+    const latencyMs = Date.now() - t0;
+
+    const text = resp.output_text;
+    if (!text) throw new Error("No AI text returned");
+
+    let parsed: any;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new Error("AI returned non-JSON text");
+    }
+
+    const result = validateClassification(parsed);
+
+    // log success (do not break main flow if logging fails)
+    try {
+      await AiLogModel.create({
+        type: "ticket_classify",
+        ticketId: ticketId || undefined,
+        triggeredBy: triggeredBy || undefined,
+        aiModel: model,
+        endpoint,
+        inputPreview: input.slice(0, 200),
+        success: true,
+        usage: {
+          inputTokens: resp.usage?.input_tokens,
+          outputTokens: resp.usage?.output_tokens,
+          totalTokens: resp.usage?.total_tokens,
+        },
+        latencyMs,
+      });
+    } catch (logErr) {
+      console.error("AI log write failed:", logErr);
+    }
+
+    return result;
+  } catch (err: any) {
+    const latencyMs = Date.now() - t0;
+
+    // log failure (do not break main flow if logging fails)
+    try {
+      await AiLogModel.create({
+        type: "ticket_classify",
+        ticketId: ticketId || undefined,
+        triggeredBy: triggeredBy || undefined,
+        aiModel: model,
+        endpoint,
+        inputPreview: input.slice(0, 200),
+        success: false,
+        error: err?.message || String(err),
+        latencyMs,
+      });
+    } catch (logErr) {
+      console.error("AI log write failed:", logErr);
+    }
+
+    throw err;
+  }
 }

@@ -29,7 +29,14 @@ export const createTicket = async (req: CustomRequest, res: Response) => {
     let finalCategory = category;
 
     try {
-      const ai = await classifyTicket({ title, description });
+      const ai = await classifyTicket({
+        title,
+        description,
+        endpoint: "/api/tickets",
+        triggeredBy: String(req.user!._id),
+
+        // ticketId: optional — only pass if you already have one
+      });
 
       if (ai.confidence >= AI_CATEGORY_CONFIDENCE_THRESHOLD) {
         finalCategory = ai.category;
